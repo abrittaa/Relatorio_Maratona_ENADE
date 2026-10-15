@@ -48,7 +48,7 @@ dados_limpos <- dados_completos %>%
   relocate(faculdade, Name, .before = 1) %>% 
   rename_with(
     formatar_cabecalho,
-    .cols = !any_of(c("Name", "faculdade", "Start Datetime", "End Datetime", "Time", "Percent", "Points Earned", "Points Possible", "id_teste"))
+    .cols = !any_of(c("Name", "faculdade", "Start Datetime", "End Datetime", "Time", "Percent", "Points Earned", "Points Possible"))
   )
 
 
