@@ -1,6 +1,8 @@
 library(tidyverse)
+library(writexl)
 
-# 1. Função para obter o primeiro valor válido
+# 1. Função para obter o primeiro valor válido ----------------------------
+
 obter_valor_valido <- function(vetor) {
   validos <- vetor[!is.na(vetor) & vetor != "NULL" & vetor != "NA" & trimws(vetor) != ""]
   if (length(validos) > 0) {
@@ -10,7 +12,9 @@ obter_valor_valido <- function(vetor) {
   }
 }
 
-# 2. Função para encurtar e desambiguar nomes duplicados
+
+# 2. Função para encurtar e desambiguar nomes duplicados ------------------
+
 formatar_cabecalho <- function(col_names) {
   # Remove espaços (ex: "GP 01" vira "GP01") e pega os 4 primeiros caracteres
   curtos <- col_names %>% 
@@ -21,11 +25,24 @@ formatar_cabecalho <- function(col_names) {
   make.unique(curtos, sep = "_")
 }
 
-# 3. Criação do 'dados_limpos'
+
+# 3. Criação do 'dados_limpos' com soma de pontuações ---------------------
+
 dados_limpos <- dados_completos %>% 
   group_by(Name, faculdade) %>% 
   summarise(
-    across(everything(), obter_valor_valido),
+    # 1. Converte para numérico e soma os pontos obtidos e possíveis
+    `Points Earned` = sum(as.numeric(`Points Earned`), na.rm = TRUE),
+    `Points Possible` = sum(as.numeric(`Points Possible`), na.rm = TRUE),
+    
+    # 2. Recalcula a porcentagem total agregada
+    Percent = ifelse(`Points Possible` > 0, round((`Points Earned` / `Points Possible`) * 100, 1), 0),
+    
+    # 3. Aplica obter_valor_valido apenas nas colunas restantes
+    across(
+      !c(`Points Earned`, `Points Possible`, Percent), 
+      obter_valor_valido
+    ),
     .groups = "drop"
   ) %>% 
   relocate(faculdade, Name, .before = 1) %>% 
@@ -34,5 +51,10 @@ dados_limpos <- dados_completos %>%
     .cols = !any_of(c("Name", "faculdade", "Start Datetime", "End Datetime", "Time", "Percent", "Points Earned", "Points Possible", "id_teste"))
   )
 
-# Visualizar o resultado
+
+# Visualizar o resultado --------------------------------------------------
+
 head(dados_limpos)
+
+write_csv(dados_limpos, "dados_limpos.csv")
+write_xlsx(dados_limpos, "dados_limpos.xlsx")
