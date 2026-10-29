@@ -282,7 +282,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
         </p>
         <div class="certificate-name" id="certName">Nome do Estudante</div>
         <p class="certificate-body">
-          filiado(a) à <strong><span id="certFaculdade">Faculdade</span></strong>, realizou a bateria de avaliações acadêmicas, obtendo um aproveitamento geral de <strong><span id="certPct">0%</span></strong> com <strong><span id="certPontos">0</span></strong> pontos computados.
+          filiado(a) à <strong><span id="certFaculdade">Faculdade</span></strong>, realizou a <strong>Maratona ENADE 2026</strong>, obtendo um aproveitamento geral de <strong><span id="certPct">0%</span></strong> com <strong><span id="certPontos">0</span></strong> pontos computados.
         </p>
 
         <div class="certificate-footer">
