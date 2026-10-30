@@ -15,18 +15,27 @@ if (file.exists("criar_dados.R")) source("criar_dados.R")
 if (file.exists("agrupar_dados.R")) source("agrupar_dados.R")
 if (file.exists("agrupar_por_teste.R")) source("agrupar_por_teste.R")
 if (file.exists("verificacao_de_realizacao_do_teste.R")) source("verificacao_de_realizacao_do_teste.R")
+source("links_testes.R") # Camada de serviço: links dos testes por instituição
+
+# Quantidade oficial de testes da Maratona ENADE 2026 (usada no certificado e no progresso)
+TOTAL_TESTES_MARATONA <- 10L
 
 # 2. Funções de Normalização e Hashing (LGPD) ----------------------------------
+remover_acentos <- function(texto) {
+  iconv(texto, from = "UTF-8", to = "ASCII//TRANSLIT") %>%
+    gsub("[^a-zA-Z0-9 ]", "", .)
+}
 normalizar_nome <- function(nome) {
-  nome %>% 
-    trimws() %>% 
-    tolower() %>% 
+  nome %>%
+    remover_acentos() %>%
+    trimws() %>%
+    tolower() %>%
     gsub("\\s+", " ", .)
 }
-
-gerar_hash <- function(nome) {
-  nome_norm <- normalizar_nome(nome)
-  digest::digest(nome_norm, algo = "sha256", serialize = FALSE)
+# Hash composto (Nome + Faculdade): Elimina 100% das colisões entre IES
+gerar_hash <- function(nome, faculdade) {
+  chave <- paste0(normalizar_nome(nome), "|", normalizar_nome(faculdade))
+  digest::digest(chave, algo = "sha256", serialize = FALSE)
 }
 
 # 3. Mapeamento e Consolidação dos Dados por Aluno ----------------------------
@@ -44,7 +53,7 @@ dados_alunos_dict <- list()
 for (i in 1:nrow(alunos_unicos)) {
   aluno_nome <- alunos_unicos$Name[i]
   aluno_faculdade <- alunos_unicos$faculdade[i]
-  hash_aluno <- gerar_hash(aluno_nome)
+  hash_aluno <- gerar_hash(aluno_nome, aluno_faculdade)
   
   # Desempenho Geral (dados_limpos)
   desempenho_geral <- dados_limpos %>% 
@@ -68,6 +77,8 @@ for (i in 1:nrow(alunos_unicos)) {
   
   detalhes_testes <- lapply(todos_testes_sistema, function(t_id) {
     t_data <- testes_aluno %>% filter(id_teste == t_id)
+    url_teste <- obter_url_teste(links_testes, aluno_faculdade, t_id)
+    url_teste <- ifelse(is.na(url_teste), "", url_teste) # "" => link desabilitado no portal
     if (nrow(t_data) > 0) {
       list(
         id_teste = t_id,
@@ -178,6 +189,16 @@ conteudo_html <- paste0('<!DOCTYPE html>
     .badge-success { background: #dcfce7; color: #15803d; }
     .badge-pending { background: #fef3c7; color: #b45309; }
 
+    /* Links dos testes (coluna Teste / Módulo) */
+    .test-link { color: var(--primary); font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; border-bottom: 1px dashed transparent; transition: color 0.2s, border-color 0.2s; }
+    .test-link:hover { color: var(--primary-hover); border-bottom-color: currentColor; }
+    .test-link:focus-visible, .test-link-cta:focus-visible { outline: 2px solid var(--primary-hover); outline-offset: 2px; border-radius: 4px; }
+    .test-link .ext-icon { font-size: 0.75rem; opacity: 0.7; }
+    .test-link-cta { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 4px; background: var(--primary); color: #ffffff; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; text-decoration: none; transition: background 0.2s; }
+    .test-link-cta:hover { background: var(--primary-hover); }
+    .test-link-disabled { color: var(--text-muted); font-weight: 700; cursor: not-allowed; }
+    .test-link-disabled small { font-weight: 400; font-size: 0.75rem; margin-left: 6px; }
+    
     /* Certificado */
     .certificate-container { background: #ffffff; border: 10px solid #1e3a8a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 30px; position: relative; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
     .certificate-title { font-family: "Cinzel", serif; font-size: 2.2rem; color: #1e3a8a; letter-spacing: 2px; margin-bottom: 10px; }
@@ -186,7 +207,11 @@ conteudo_html <- paste0('<!DOCTYPE html>
     .certificate-body { font-size: 1.1rem; color: #334155; line-height: 1.8; margin-bottom: 30px; }
     .certificate-footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b; }
 
+    @page { size: A4 landscape; margin: 12mm; }
+
     @media print {
+      body { padding: 0; background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .container { margin: 0; max-width: none; }
       body * { visibility: hidden; }
       .certificate-container, .certificate-container * { visibility: visible; }
       .certificate-container { position: absolute; left: 0; top: 0; width: 100%; border: 8px solid #1e3a8a; padding: 30px; }
@@ -274,7 +299,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
 
       <!-- Certificado Personalizado -->
       <div id="certificateSection" class="certificate-container">
-        <div class="certificate-title">CERTIFICADO DE DESEMPENHO</div>
+        <div class="certificate-title">MARATONA ENADE 2026</div>
         <div class="certificate-subtitle">Certificamos a participação e conclusão de avaliação</div>
         
         <p class="certificate-body">
@@ -308,6 +333,66 @@ conteudo_html <- paste0('<!DOCTYPE html>
       return Array.prototype.map.call(new Uint8Array(buf), x => (("0" + x.toString(16)).slice(-2))).join("");
     }
 
+
+    // Aceita apenas URLs http(s) válidas; caso contrário o teste fica desabilitado
+    function urlSegura(url) {
+      if (!url || typeof url !== "string") return null;
+      try {
+        const u = new URL(url);
+        return (u.protocol === "https:" || u.protocol === "http:") ? u.href : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Monta o conteúdo da coluna "Teste / Módulo": link externo ou estado desabilitado
+    function criarCelulaTeste(t, idx) {
+      const frag = document.createDocumentFragment();
+      const url = urlSegura(t.url);
+
+      if (!url) {
+        const span = document.createElement("span");
+        span.className = "test-link-disabled";
+        span.setAttribute("aria-disabled", "true");
+        span.title = "Link deste teste ainda não disponível para sua instituição";
+        span.textContent = t.id_teste;
+        const info = document.createElement("small");
+        info.textContent = "(link indisponível)";
+        span.appendChild(info);
+        frag.appendChild(span);
+        return frag;
+      }
+
+      const a = document.createElement("a");
+      a.id = "linkTeste" + idx;
+      a.className = "test-link";
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.title = "Abrir " + t.id_teste + " em nova aba";
+      a.textContent = t.id_teste;
+      const icon = document.createElement("span");
+      icon.className = "ext-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = "↗";
+      a.appendChild(icon);
+      frag.appendChild(a);
+
+      // Testes pendentes ganham um atalho explícito para realizar a avaliação
+      if (t.status === "Pendente") {
+        const cta = document.createElement("a");
+        cta.id = "linkFazerTeste" + idx;
+        cta.className = "test-link-cta";
+        cta.href = url;
+        cta.target = "_blank";
+        cta.rel = "noopener noreferrer";
+        cta.textContent = "Fazer agora";
+        frag.appendChild(cta);
+      }
+      return frag;
+    }
+
+
     function normalizarTexto(txt) {
       return txt.trim().toLowerCase().replace(/\\s+/g, " ");
     }
@@ -333,6 +418,8 @@ conteudo_html <- paste0('<!DOCTYPE html>
         errorMsg.innerText = "Nome não encontrado. Certifique-se de digitar seu nome completo exatamente como cadastrado.";
       }
     }
+    
+    
 
     function renderizarAluno(aluno) {
       document.getElementById("searchSection").classList.add("hidden");
@@ -377,6 +464,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
           <td>${t.percent}%</td>
           <td>${t.time}</td>
         `;
+        tr.firstElementChild.appendChild(criarCelulaTeste(t, idx));
         tbody.appendChild(tr);
       });
 
@@ -385,6 +473,10 @@ conteudo_html <- paste0('<!DOCTYPE html>
       document.getElementById("certFaculdade").innerText = aluno.faculdade;
       document.getElementById("certPct").innerText = aluno.porcentagem_geral + "%";
       document.getElementById("certPontos").innerText = aluno.pontos_ganhos + " de " + aluno.pontos_possiveis;
+      document.getElementById("certTestesQtd").innerText =
+        aluno.testes_concluidos;
+      document.getElementById("certTestesLabel").innerText = aluno.testes_concluidos === 1 ? "teste" : "testes";
+      document.getElementById("certTestesTotal").innerText = aluno.total_testes;
       document.getElementById("certCodigo").innerText = aluno.codigo_certificado;
       document.getElementById("certData").innerText = aluno.data_emissao;
     }
@@ -401,3 +493,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
 # 5. Salvar arquivo HTML -------------------------------------------------------
 writeLines(conteudo_html, con = "portal_alunos.html", useBytes = TRUE)
 message("✅ Sucesso! O arquivo 'portal_alunos.html' foi gerado com sucesso.")
+
+
+
+
