@@ -3,9 +3,10 @@ library(readxl)
 library(tidyverse)
 
 caminhos_excel <- c(
-  "E:/UNIFEI/ENADE/Link simulados ENADE.xlsm",
+  "E:/UNIFEI/2026.2/enade/Link simulados ENADE.xlsm",
   "../Link simulados ENADE.xlsm",
-  "Link simulados ENADE.xlsm"
+  "Link simulados ENADE.xlsm",
+  "E:/UNIFEI/ENADE/Link simulados ENADE.xlsm"
 )
 
 caminho_excel <- caminhos_excel[file.exists(caminhos_excel)][1]

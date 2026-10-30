@@ -32,6 +32,23 @@ dados_completos <- todos_arquivos %>%
       relocate(faculdade, Name, Name_norm, .before = 1)
   })
 
+# 3.1 Padronização Canônica: Garante que cada aluno tenha exatamente a mesma grafia do Name em todos os testes
+mapa_nomes <- dados_completos %>%
+  group_by(faculdade, Name_norm) %>%
+  summarise(
+    Name_canonico = {
+      nomes <- unique(Name)
+      com_maiuscula <- nomes[grepl("[A-ZÀ-Ú]", nomes)]
+      if (length(com_maiuscula) > 0) com_maiuscula[1] else nomes[1]
+    },
+    .groups = "drop"
+  )
+
+dados_completos <- dados_completos %>%
+  left_join(mapa_nomes, by = c("faculdade", "Name_norm")) %>%
+  mutate(Name = Name_canonico) %>%
+  select(-Name_canonico)
+
 # 4. Separar os dados e criar um objeto para cada teste no R (teste_01, teste_02, etc.)
 dados_completos %>% 
   group_split(id_teste) %>% 
