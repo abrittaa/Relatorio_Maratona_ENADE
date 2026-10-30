@@ -16,8 +16,9 @@ total_testes <- length(todos_testes)
 # 2. Resumo por Aluno: Testes Pendentes e Porcentagem de Conclusão -------
 
 relatorio_testes_alunos <- dados_completos %>% 
-  group_by(faculdade, Name) %>% 
+  group_by(faculdade, Name_norm) %>% 
   summarise(
+    Name = first(Name),
     # Contagem de testes únicos que o aluno realizou
     testes_realizados_qtd = n_distinct(id_teste),
     
@@ -39,6 +40,8 @@ relatorio_testes_alunos <- dados_completos %>%
       testes_nao_respondidos
     )
   ) %>% 
+  select(-Name_norm) %>% 
+  relocate(faculdade, Name, .before = 1) %>% 
   arrange(faculdade, Name)
 
 

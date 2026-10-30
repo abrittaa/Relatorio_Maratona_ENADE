@@ -16,7 +16,7 @@ dados_completos <- todos_arquivos %>%
     
     # Extrai o nome da faculdade removendo "Teste XX" (independente de maiúsculas/minúsculas)
     nome_sem_ext <- file_path_sans_ext(basename(file_path))
-    nome_faculdade <- sub("^(?i)teste[ _]*\\d+[ _]*", "", nome_sem_ext)
+    nome_faculdade <- sub("^teste[ _]*\\d+[ _]*", "", nome_sem_ext, ignore.case = TRUE)
     
     # Lê o CSV, adiciona as colunas e coloca 'faculdade' na primeira posição
     read_csv(
@@ -26,9 +26,10 @@ dados_completos <- todos_arquivos %>%
     ) %>% 
       mutate(
         faculdade = nome_faculdade,
-        id_teste = nome_pasta
+        id_teste = nome_pasta,
+        Name_norm = Name %>% trimws() %>% tolower() %>% gsub("\\s+", " ", .)
       ) %>% 
-      relocate(faculdade, .before = 1) # <--- Move para a 1ª coluna
+      relocate(faculdade, Name, Name_norm, .before = 1)
   })
 
 # 4. Separar os dados e criar um objeto para cada teste no R (teste_01, teste_02, etc.)

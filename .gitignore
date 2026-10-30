@@ -4,6 +4,6 @@
 .Ruserdata
 *.xlsx
 *.csv
+!config/links_testes.csv
 *.key
 *.html
-!config/links_testes.csv

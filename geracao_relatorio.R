@@ -12,8 +12,8 @@ library(digest)
 message("Carregando e integrando dados dos testes...")
 
 if (file.exists("criar_dados.R")) source("criar_dados.R")
-if (file.exists("agrupar_dados.R")) source("agrupar_dados.R")
 if (file.exists("agrupar_por_teste.R")) source("agrupar_por_teste.R")
+if (file.exists("agrupar_dados.R")) source("agrupar_dados.R")
 if (file.exists("verificacao_de_realizacao_do_teste.R")) source("verificacao_de_realizacao_do_teste.R")
 source("links_testes.R") # Camada de serviço: links dos testes por instituição
 
@@ -21,61 +21,55 @@ source("links_testes.R") # Camada de serviço: links dos testes por instituiçã
 TOTAL_TESTES_MARATONA <- 10L
 
 # 2. Funções de Normalização e Hashing (LGPD) ----------------------------------
-remover_acentos <- function(texto) {
-  iconv(texto, from = "UTF-8", to = "ASCII//TRANSLIT") %>%
-    gsub("[^a-zA-Z0-9 ]", "", .)
-}
 normalizar_nome <- function(nome) {
   nome %>%
-    remover_acentos() %>%
     trimws() %>%
     tolower() %>%
     gsub("\\s+", " ", .)
 }
-# Hash composto (Nome + Faculdade): Elimina 100% das colisões entre IES
-gerar_hash <- function(nome, faculdade) {
-  chave <- paste0(normalizar_nome(nome), "|", normalizar_nome(faculdade))
-  digest::digest(chave, algo = "sha256", serialize = FALSE)
+
+gerar_hash <- function(nome) {
+  nome_norm <- normalizar_nome(nome)
+  digest::digest(nome_norm, algo = "sha256", serialize = FALSE)
 }
 
 # 3. Mapeamento e Consolidação dos Dados por Aluno ----------------------------
 message("Consolidando base de dados por aluno...")
 
-alunos_unicos <- dados_limpos %>% 
-  select(Name, faculdade) %>% 
+alunos_unicos <- dados_limpos %>%
+  select(Name, faculdade) %>%
   distinct()
 
-todos_testes_sistema <- sort(unique(dados_completos$id_teste))
-total_testes_sistema <- length(todos_testes_sistema)
+# IDs padronizados ("teste 05" -> "Teste 05") para casar com o mapeamento de links
+todos_testes_sistema <- sort(unique(padronizar_id_teste(dados_completos$id_teste)))
+dados_per_teste_pad <- dados_per_teste %>% mutate(id_teste = padronizar_id_teste(id_teste))
+
+# Mapeamento de links por instituição (config/links_testes.csv)
+links_testes <- carregar_links_testes()
 
 dados_alunos_dict <- list()
 
 for (i in 1:nrow(alunos_unicos)) {
   aluno_nome <- alunos_unicos$Name[i]
   aluno_faculdade <- alunos_unicos$faculdade[i]
-  hash_aluno <- gerar_hash(aluno_nome, aluno_faculdade)
-  
+  hash_aluno <- gerar_hash(aluno_nome)
+
   # Desempenho Geral (dados_limpos)
-  desempenho_geral <- dados_limpos %>% 
+  desempenho_geral <- dados_limpos %>%
     filter(Name == aluno_nome, faculdade == aluno_faculdade)
-  
+
   pts_earned <- ifelse(nrow(desempenho_geral) > 0, desempenho_geral$`Points Earned`[1], 0)
   pts_possible <- ifelse(nrow(desempenho_geral) > 0, desempenho_geral$`Points Possible`[1], 0)
   pct_geral <- ifelse(nrow(desempenho_geral) > 0, desempenho_geral$Percent[1], 0)
-  
-  # Status de Realização (relatorio_testes_alunos)
-  rel_status <- relatorio_testes_alunos %>% 
-    filter(Name == aluno_nome, faculdade == aluno_faculdade)
-  
-  qtd_realizados <- ifelse(nrow(rel_status) > 0, rel_status$testes_realizados_qtd[1], 0)
-  pct_realizados <- ifelse(nrow(rel_status) > 0, rel_status$pct_testes_realizados[1], 0)
-  nao_respondidos <- ifelse(nrow(rel_status) > 0, rel_status$testes_nao_respondidos[1], "")
-  
+
   # Detalhamento individual por teste (dados_per_teste)
-  testes_aluno <- dados_per_teste %>% 
+  testes_aluno <- dados_per_teste_pad %>%
     filter(Name == aluno_nome, faculdade == aluno_faculdade)
-  
-  detalhes_testes <- lapply(todos_testes_sistema, function(t_id) {
+
+  # Testes exibidos: os já aplicados + os que possuem link cadastrado para a instituição
+  testes_exibidos <- sort(union(todos_testes_sistema, testes_com_link(links_testes, aluno_faculdade)))
+
+  detalhes_testes <- lapply(testes_exibidos, function(t_id) {
     t_data <- testes_aluno %>% filter(id_teste == t_id)
     url_teste <- obter_url_teste(links_testes, aluno_faculdade, t_id)
     url_teste <- ifelse(is.na(url_teste), "", url_teste) # "" => link desabilitado no portal
@@ -86,7 +80,8 @@ for (i in 1:nrow(alunos_unicos)) {
         points_earned = t_data$`Points Earned`[1],
         points_possible = t_data$`Points Possible`[1],
         percent = t_data$Percent[1],
-        time = ifelse(is.na(t_data$Time[1]), "-", t_data$Time[1])
+        time = ifelse(is.na(t_data$Time[1]), "-", t_data$Time[1]),
+        url = url_teste
       )
     } else {
       list(
@@ -95,13 +90,22 @@ for (i in 1:nrow(alunos_unicos)) {
         points_earned = 0,
         points_possible = 0,
         percent = 0,
-        time = "-"
+        time = "-",
+        url = url_teste
       )
     }
   })
-  
+
+  # Status de Realização (derivado do detalhamento, já com IDs padronizados)
+  status_testes <- vapply(detalhes_testes, function(t) t$status, character(1))
+  ids_testes <- vapply(detalhes_testes, function(t) t$id_teste, character(1))
+  qtd_realizados <- sum(status_testes == "Concluído")
+  pct_realizados <- round(min(qtd_realizados, TOTAL_TESTES_MARATONA) / TOTAL_TESTES_MARATONA * 100, 1)
+  lista_pendentes <- ids_testes[status_testes == "Pendente"]
+  nao_respondidos <- if (length(lista_pendentes) == 0) "Nenhum (Respondeu a todos)" else paste(lista_pendentes, collapse = ", ")
+
   codigo_validacao <- paste0("CERT-", toupper(substr(hash_aluno, 1, 10)))
-  
+
   dados_alunos_dict[[hash_aluno]] <- list(
     nome = aluno_nome,
     faculdade = aluno_faculdade,
@@ -109,7 +113,7 @@ for (i in 1:nrow(alunos_unicos)) {
     pontos_possiveis = pts_possible,
     porcentagem_geral = pct_geral,
     testes_concluidos = qtd_realizados,
-    total_testes = total_testes_sistema,
+    total_testes = TOTAL_TESTES_MARATONA,
     progresso_pct = pct_realizados,
     testes_pendentes = nao_respondidos,
     detalhes_testes = detalhes_testes,
@@ -149,7 +153,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
     body { font-family: "Inter", sans-serif; background-color: var(--bg); color: var(--text); line-height: 1.5; padding: 20px; }
 
     .container { max-width: 900px; margin: 30px auto; }
-    
+
     .header { text-align: center; margin-bottom: 30px; }
     .header h1 { color: var(--primary); font-size: 2rem; margin-bottom: 8px; }
     .header p { color: var(--text-muted); font-size: 0.95rem; }
@@ -198,10 +202,11 @@ conteudo_html <- paste0('<!DOCTYPE html>
     .test-link-cta:hover { background: var(--primary-hover); }
     .test-link-disabled { color: var(--text-muted); font-weight: 700; cursor: not-allowed; }
     .test-link-disabled small { font-weight: 400; font-size: 0.75rem; margin-left: 6px; }
-    
+
     /* Certificado */
     .certificate-container { background: #ffffff; border: 10px solid #1e3a8a; padding: 40px; text-align: center; border-radius: 8px; margin-top: 30px; position: relative; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-    .certificate-title { font-family: "Cinzel", serif; font-size: 2.2rem; color: #1e3a8a; letter-spacing: 2px; margin-bottom: 10px; }
+    .certificate-title { font-family: "Cinzel", serif; font-size: 2.2rem; color: #1e3a8a; letter-spacing: 2px; margin-bottom: 10px; line-height: 1.2; }
+    .certificate-event { display: block; font-size: 1.35rem; letter-spacing: 4px; color: #1d4ed8; margin-top: 6px; }
     .certificate-subtitle { font-size: 1rem; color: #64748b; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 30px; }
     .certificate-name { font-size: 2rem; font-weight: 700; color: #0f172a; border-bottom: 2px solid #1e3a8a; display: inline-block; padding: 0 20px 5px; margin: 20px 0; }
     .certificate-body { font-size: 1.1rem; color: #334155; line-height: 1.8; margin-bottom: 30px; }
@@ -214,7 +219,12 @@ conteudo_html <- paste0('<!DOCTYPE html>
       .container { margin: 0; max-width: none; }
       body * { visibility: hidden; }
       .certificate-container, .certificate-container * { visibility: visible; }
-      .certificate-container { position: absolute; left: 0; top: 0; width: 100%; border: 8px solid #1e3a8a; padding: 30px; }
+      .certificate-container { position: absolute; left: 0; top: 0; width: 100%; margin: 0; border: 8px solid #1e3a8a; border-radius: 0; padding: 30px; box-shadow: none; break-inside: avoid; page-break-inside: avoid; }
+      .certificate-title { font-size: 1.9rem; }
+      .certificate-event { font-size: 1.2rem; }
+      .certificate-name { margin: 12px 0; }
+      .certificate-body { margin-bottom: 16px; }
+      .certificate-footer { margin-top: 24px; }
       .no-print { display: none !important; }
     }
   </style>
@@ -299,15 +309,15 @@ conteudo_html <- paste0('<!DOCTYPE html>
 
       <!-- Certificado Personalizado -->
       <div id="certificateSection" class="certificate-container">
-        <div class="certificate-title">MARATONA ENADE 2026</div>
+        <div class="certificate-title">CERTIFICADO DE DESEMPENHO <span class="certificate-event">MARATONA ENADE 2026</span></div>
         <div class="certificate-subtitle">Certificamos a participação e conclusão de avaliação</div>
-        
+
         <p class="certificate-body">
           Certificamos que o(a) estudante
         </p>
         <div class="certificate-name" id="certName">Nome do Estudante</div>
         <p class="certificate-body">
-          filiado(a) à <strong><span id="certFaculdade">Faculdade</span></strong>, realizou a <strong>Maratona ENADE 2026</strong>, obtendo um aproveitamento geral de <strong><span id="certPct">0%</span></strong> com <strong><span id="certPontos">0</span></strong> pontos computados.
+          filiado(a) à <strong><span id="certFaculdade">Faculdade</span></strong>, realizou a <strong>maratona ENADE 2026</strong>, realizando <strong><span id="certTestesQtd">0</span> <span id="certTestesLabel">testes</span> dos <span id="certTestesTotal">10</span> testes da Maratona</strong>, obtendo um aproveitamento geral de <strong><span id="certPct">0%</span></strong> com <strong><span id="certPontos">0</span></strong> pontos computados.
         </p>
 
         <div class="certificate-footer">
@@ -332,7 +342,6 @@ conteudo_html <- paste0('<!DOCTYPE html>
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
       return Array.prototype.map.call(new Uint8Array(buf), x => (("0" + x.toString(16)).slice(-2))).join("");
     }
-
 
     // Aceita apenas URLs http(s) válidas; caso contrário o teste fica desabilitado
     function urlSegura(url) {
@@ -392,7 +401,6 @@ conteudo_html <- paste0('<!DOCTYPE html>
       return frag;
     }
 
-
     function normalizarTexto(txt) {
       return txt.trim().toLowerCase().replace(/\\s+/g, " ");
     }
@@ -400,7 +408,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
     async function consultarAlunos() {
       const inputVal = document.getElementById("studentNameInput").value;
       const errorMsg = document.getElementById("errorMsg");
-      
+
       if (!inputVal.trim()) {
         errorMsg.style.display = "block";
         errorMsg.innerText = "Por favor, digite seu nome completo.";
@@ -418,8 +426,6 @@ conteudo_html <- paste0('<!DOCTYPE html>
         errorMsg.innerText = "Nome não encontrado. Certifique-se de digitar seu nome completo exatamente como cadastrado.";
       }
     }
-    
-    
 
     function renderizarAluno(aluno) {
       document.getElementById("searchSection").classList.add("hidden");
@@ -433,7 +439,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
       document.getElementById("dispGeralPct").innerText = aluno.porcentagem_geral + "%";
       document.getElementById("dispPontos").innerText = aluno.pontos_ganhos + " / " + aluno.pontos_possiveis;
       document.getElementById("dispTestesQtd").innerText = aluno.testes_concluidos + " / " + aluno.total_testes;
-      
+
       // Barra de Progresso
       document.getElementById("dispProgresoPct").innerText = aluno.progresso_pct + "%";
       document.getElementById("dispProgressoFill").style.width = aluno.progresso_pct + "%";
@@ -450,15 +456,15 @@ conteudo_html <- paste0('<!DOCTYPE html>
       // Tabela de Testes
       const tbody = document.getElementById("tableBodyTestes");
       tbody.innerHTML = "";
-      
-      aluno.detalhes_testes.forEach(t => {
+
+      aluno.detalhes_testes.forEach((t, idx) => {
         const tr = document.createElement("tr");
-        const statusBadge = t.status === "Concluído" 
-          ? \'<span class="badge badge-success">Concluído</span>\' 
+        const statusBadge = t.status === "Concluído"
+          ? \'<span class="badge badge-success">Concluído</span>\'
           : \'<span class="badge badge-pending">Pendente</span>\';
 
         tr.innerHTML = `
-          <td><strong>${t.id_teste}</strong></td>
+          <td></td>
           <td>${statusBadge}</td>
           <td>${t.points_earned} / ${t.points_possible}</td>
           <td>${t.percent}%</td>
@@ -493,7 +499,3 @@ conteudo_html <- paste0('<!DOCTYPE html>
 # 5. Salvar arquivo HTML -------------------------------------------------------
 writeLines(conteudo_html, con = "portal_alunos.html", useBytes = TRUE)
 message("✅ Sucesso! O arquivo 'portal_alunos.html' foi gerado com sucesso.")
-
-
-
-

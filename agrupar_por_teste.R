@@ -3,11 +3,16 @@ library(writexl)
 
 # 1. Objeto 'dados_per_teste' (1 linha para cada Teste que o Aluno realizou)
 dados_per_teste <- dados_completos %>% 
-  group_by(faculdade, Name, id_teste) %>% 
+  # 1. Deduplicação: se houver mais de um envio do mesmo teste, mantém o de maior percentual
+  arrange(faculdade, Name_norm, id_teste, desc(as.numeric(Percent))) %>% 
+  distinct(faculdade, Name_norm, id_teste, .keep_all = TRUE) %>% 
+  # 2. Agrupamento seguro pelo nome normalizado
+  group_by(faculdade, Name_norm, id_teste) %>% 
   summarise(
-    `Points Earned`   = sum(as.numeric(`Points Earned`), na.rm = TRUE),
-    `Points Possible` = sum(as.numeric(`Points Possible`), na.rm = TRUE),
-    Percent           = ifelse(`Points Possible` > 0, round((`Points Earned` / `Points Possible`) * 100, 1), 0),
+    Name              = first(Name), # Preserva a melhor grafia
+    `Points Earned`   = as.numeric(`Points Earned`),
+    `Points Possible` = as.numeric(`Points Possible`),
+    Percent           = round((`Points Earned` / `Points Possible`) * 100, 1),
     Time              = first(Time),
     `Start Datetime`  = first(`Start Datetime`),
     `End Datetime`    = first(`End Datetime`),
