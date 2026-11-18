@@ -7,3 +7,4 @@
 !config/links_testes.csv
 *.key
 *.html
+!index.html

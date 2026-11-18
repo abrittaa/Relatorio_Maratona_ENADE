@@ -496,6 +496,7 @@ conteudo_html <- paste0('<!DOCTYPE html>
 </body>
 </html>')
 
-# 5. Salvar arquivo HTML -------------------------------------------------------
+# 5. Salvar arquivos HTML (local e GitHub Pages) -------------------------------
 writeLines(conteudo_html, con = "portal_alunos.html", useBytes = TRUE)
-message("✅ Sucesso! O arquivo 'portal_alunos.html' foi gerado com sucesso.")
+writeLines(conteudo_html, con = "index.html", useBytes = TRUE)
+message("✅ Sucesso! Os arquivos 'portal_alunos.html' e 'index.html' (GitHub Pages) foram gerados com sucesso.")
